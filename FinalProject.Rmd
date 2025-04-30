@@ -11,6 +11,151 @@ knitr::opts_chunk$set(echo = TRUE)
 ## Section One
 
 ```{r student1}
+library(rvest)
+library(dplyr)
+library(stringr)
+
+# Define the URL (this is only 2024 — you'll loop over more later)
+url <- "https://www.billboard.com/lists/year-end-hot-100-number-one-songs/2024-12/"
+
+# Read the HTML
+page <- read_html(url)
+
+# Find all article blocks — each represents one song entry
+articles <- page %>% html_nodes("article.pmc-fallback-list-item")
+
+# Initialize data frame
+songs_info <- data.frame()
+
+# Loop through each article
+for (article in articles) {
+  # Extract year from <h2>
+  chart_year <- article %>% html_node("h2") %>% html_text(trim = TRUE) %>% as.numeric()
+
+  # Extract song block text from <p>
+  song_text <- article %>%
+    html_node("p.paragraph.larva") %>%
+    html_text(trim = TRUE)
+
+  # Extract "Artist, “Title”"
+  artist_title_line <- str_extract(song_text, "^[^“”]+“[^“”]+”")
+
+  # If it's a valid artist/title line:
+  if (!is.na(artist_title_line)) {
+    artist <- str_trim(str_extract(artist_title_line, "^[^,]+"))
+    title <- str_extract(artist_title_line, "“[^“”]+”") %>%
+      str_replace_all("“|”", "") %>%
+      str_trim()
+
+    # Extract peak year
+    peak_year <- str_extract(song_text, "Hot 100 peak date: .*?(\\d{4})") %>%
+      str_extract("\\d{4}") %>%
+      as.numeric()
+
+    # Add to the data frame
+    songs_info <- rbind(songs_info, data.frame(
+      chart_year = chart_year,
+      peak_year = peak_year,
+      artist = artist,
+      title = title,
+      stringsAsFactors = FALSE
+    ))
+  }
+}
+
+# View the cleaned result
+print(songs_info)
+
+
+# Clean individual chunks of lyrics (removes section tags like [Chorus], etc.)
+clean_lyrics_block <- function(text) {
+  text <- str_remove_all(text, "\\r")  # remove carriage returns
+  text <- str_replace_all(text, "\\n{2,}", "\n")  # reduce extra newlines
+
+  # Start from first bracketed section like [Intro], [Verse 1], etc.
+  start <- str_locate(text, "\\[.*?\\]")[1, "start"]
+  if (!is.na(start)) {
+    text <- substr(text, start, nchar(text))
+  }
+
+  # Remove section headers like [Chorus], [Verse 2]
+  text <- str_remove_all(text, "\\[.*?\\]")
+
+  str_squish(text)
+}
+
+
+# Normalize artist and title for Genius URLs
+normalize_for_url <- function(x) {
+  
+  #Special cases
+  x <- str_replace_all(x, "Dionne & Friends ", "")
+  x <- str_replace_all(x, "Dawn feat. Tony Orlando", "Tony Orlando & Dawn")
+  x <- str_replace_all(x, "Mr. Acker Bilk", "Acker Bilk")
+  x <- str_replace_all(x, "Volare", "-Volare")
+  x <- str_replace_all(x, "Nel Blu Dipinto Di Blu", "Volare")
+  x <- str_replace_all(x, "-Volare", "Nel Blu Dipinto Di Blu")
+  x <- str_replace_all(x, "Theme From A Summer Place", "The Theme From A Summer Place")
+  
+  # Convert to lowercase
+  x <- tolower(x)
+  
+  # Normalize special characters (accented letters to their unaccented counterparts)
+  x <- str_replace_all(x, "é", "e")
+  x <- str_replace_all(x, "á", "a")
+  x <- str_replace_all(x, "í", "i")
+  x <- str_replace_all(x, "ó", "o")
+  x <- str_replace_all(x, "ú", "u")
+  x <- str_replace_all(x, "ñ", "n")
+  
+  # Remove "feat." or "ft." and anything after that in the title (to exclude featured artists)
+  x <- str_replace(x, "( feat.*| ft.*)", "")  # Remove "feat." and everything after it
+  
+  # Replace any &s with and
+  x <- str_replace_all(x, "&", "and")
+  
+  #Set all - to spaces
+  x <- str_replace_all(x, "-", " ")
+  
+  # Remove apostrophes and parentheses
+  x <- str_replace_all(x, "[^a-z0-9 ]", "")  # Remove non-alphanumeric characters
+  
+  # Replace spaces with hyphens
+  x <- str_replace_all(x, " ", "-")
+  
+  return(x)
+}
+
+# Get lyrics from constructed Genius URL
+get_lyrics_from_genius_direct <- function(artist, title, verbose = TRUE) {
+  artist_url <- normalize_for_url(artist)
+  title_url <- normalize_for_url(title)
+  url <- paste0("https://genius.com/", artist_url, "-", title_url, "-lyrics")
+
+  if (verbose) message("🔗 Trying URL: ", url)
+
+  song_page <- tryCatch(read_html(url), error = function(e) return(NA))
+  if (is.na(song_page)) {
+    if (verbose) message("❌ Failed to load page.")
+    return(NA)
+  }
+
+  lyrics_blocks <- song_page %>%
+    html_elements("div[data-lyrics-container='true']") %>%
+    html_text2()
+
+  # Combine and clean
+  full_lyrics <- lyrics_blocks %>%
+    map_chr(clean_lyrics_block) %>%
+    paste(collapse = "\n")
+
+  return(full_lyrics)
+}
+
+songs_df <- songs_info %>%
+  mutate(lyrics = map2_chr(artist, title, get_lyrics_from_genius_direct))
+
+songs_df %>% select(artist, title, lyrics)
 
 ```
 
