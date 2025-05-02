@@ -69,21 +69,19 @@ print(songs_info)
 
 # Clean individual chunks of lyrics (removes section tags like [Chorus], etc.)
 clean_lyrics_block <- function(text) {
-  if (is.na(text) || nchar(text) == 0) return(NA)
-  
-  # Remove carriage returns and reduce multiple newlines
-  text <- str_remove_all(text, "\\r")
-  text <- str_replace_all(text, "\\n{2,}", "\n")
-  
-  # Remove section headers like [Chorus], [Verse 1]
+  text <- str_remove_all(text, "\\r")  # remove carriage returns
+  text <- str_replace_all(text, "\\n{2,}", "\n")  # reduce extra newlines
+
+  # Start from first bracketed section like [Intro], [Verse 1], etc.
+  start <- str_locate(text, "\\[.*?\\]")[1, "start"]
+  if (!is.na(start)) {
+    text <- substr(text, start, nchar(text))
+  }
+
+  # Remove section headers like [Chorus], [Verse 2]
   text <- str_remove_all(text, "\\[.*?\\]")
-  
-  # Trim whitespace but preserve single newlines
-  text <- str_trim(text)
-  lines <- str_split(text, "\n")[[1]] %>%
-    str_squish() %>%
-    .[nchar(.) > 0]
-  paste(lines, collapse = "\n")
+
+  str_squish(text)
 }
 
 # Normalize artist and title for Genius URLs
