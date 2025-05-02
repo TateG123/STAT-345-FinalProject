@@ -69,21 +69,22 @@ print(songs_info)
 
 # Clean individual chunks of lyrics (removes section tags like [Chorus], etc.)
 clean_lyrics_block <- function(text) {
-  text <- str_remove_all(text, "\\r")  # remove carriage returns
-  text <- str_replace_all(text, "\\n{2,}", "\n")  # reduce extra newlines
-
-  # Start from first bracketed section like [Intro], [Verse 1], etc.
-  start <- str_locate(text, "\\[.*?\\]")[1, "start"]
-  if (!is.na(start)) {
-    text <- substr(text, start, nchar(text))
-  }
-
-  # Remove section headers like [Chorus], [Verse 2]
+  if (is.na(text) || nchar(text) == 0) return(NA)
+  
+  # Remove carriage returns and reduce multiple newlines
+  text <- str_remove_all(text, "\\r")
+  text <- str_replace_all(text, "\\n{2,}", "\n")
+  
+  # Remove section headers like [Chorus], [Verse 1]
   text <- str_remove_all(text, "\\[.*?\\]")
-
-  str_squish(text)
+  
+  # Trim whitespace but preserve single newlines
+  text <- str_trim(text)
+  lines <- str_split(text, "\n")[[1]] %>%
+    str_squish() %>%
+    .[nchar(.) > 0]
+  paste(lines, collapse = "\n")
 }
-
 
 # Normalize artist and title for Genius URLs
 normalize_for_url <- function(x) {
@@ -163,7 +164,107 @@ songs_df %>% select(artist, title, lyrics)
 ## Section Two
 
 ```{r student2}
+library(dplyr)
+library(purrr)
+library(stringr)
 
+# Function to calculate phrase repetition score
+calculate_phrase_repetition <- function(lyrics) {
+  if (is.na(lyrics) || nchar(lyrics) == 0) return(NA)  # Handle missing or empty lyrics
+  
+  # Split lyrics into lines and normalize
+  lines <- str_split(lyrics, "\n")[[1]] %>%
+    str_squish() %>%  # Remove extra whitespace
+    tolower() %>%  # Case-insensitive comparison
+    str_replace_all("[^a-z0-9 ]", "") %>%  # Remove punctuation
+    .[nchar(.) > 0]  # Remove empty lines
+  
+  if (length(lines) < 2) return(NA)  # Need at least 2 lines for repetition
+  
+  # Count unique lines and their frequencies
+  line_counts <- table(lines)
+  
+  # Calculate proportion of lines that are repeated (appear more than once)
+  repeated_lines <- sum(line_counts[line_counts > 1])
+  total_lines <- length(lines)
+  
+  # Repetition score: proportion of lines that are repetitions
+  repetition_score <- if (total_lines > 0) repeated_lines / total_lines else 0
+  
+  return(repetition_score)
+}
+
+# Function to calculate song title repetition frequency
+calculate_title_repetition <- function(lyrics, title) {
+  if (is.na(lyrics) || nchar(lyrics) == 0 || is.na(title)) return(NA)  # Handle missing inputs
+  
+  # Normalize lyrics and title
+  lyrics_clean <- tolower(lyrics) %>%
+    str_replace_all("[^a-z0-9 ]", "") %>%  # Remove punctuation
+    str_squish()
+  title_clean <- tolower(title) %>%
+    str_replace_all("[^a-z0-9 ]", "") %>%  # Remove punctuation
+    str_squish()
+  
+  # Count total words in lyrics
+  total_words <- length(str_split(lyrics_clean, "\\s+")[[1]])
+  if (total_words < 10) return(NA)  # Avoid unreliable scores for very short lyrics
+  
+  # Try multiple title variants
+  title_words <- str_split(title_clean, "\\s+")[[1]]
+  title_variants <- c(
+    title_clean,  # Full title
+    if (length(title_words) > 1) paste(head(title_words, length(title_words) - 1), collapse = " "),  # Drop last word
+    if (length(title_words) > 2) paste(head(title_words, 2), collapse = " ")  # First two words
+  ) %>% unique() %>% .[!is.na(.)]
+  
+  # Count occurrences of any variant
+  title_count <- sum(sapply(title_variants, function(v) {
+    pattern <- paste0("\\b", str_replace_all(v, " ", "\\s+"), "\\b")
+    str_count(lyrics_clean, pattern)
+  }))
+  
+  # Normalize by total words (repetitions per 100 words)
+  title_repetition <- if (total_words > 0) (title_count / total_words) * 100 else 0
+  
+  return(title_repetition)
+}
+
+# Verify songs_df has required columns
+if (!all(c("chart_year", "artist", "title", "lyrics") %in% colnames(songs_df))) {
+  stop("songs_df is missing required columns. Check scraping and lyrics fetching steps.")
+}
+
+# Apply repetition measures with error handling
+songs_df <- tryCatch({
+  songs_df %>%
+    mutate(
+      phrase_repetition = map_dbl(lyrics, ~ calculate_phrase_repetition(.x)),
+      title_repetition = map2_dbl(lyrics, title, ~ calculate_title_repetition(.x, .y))
+    )
+}, error = function(e) {
+  cat("Error in mutate step:", e$message, "\n")
+  songs_df  # Return original data frame to avoid losing data
+})
+
+# Verify repetition columns were added
+if (!all(c("phrase_repetition", "title_repetition") %in% colnames(songs_df))) {
+  stop("Failed to add phrase_repetition or title_repetition columns.")
+}
+
+# Diagnostics: Check for missing or zero values
+cat("Songs with missing lyrics:", sum(is.na(songs_df$lyrics)), "\n")
+cat("Songs with missing phrase_repetition:", sum(is.na(songs_df$phrase_repetition)), "\n")
+cat("Songs with missing title_repetition:", sum(is.na(songs_df$title_repetition)), "\n")
+cat("Songs with zero phrase_repetition (but valid lyrics):",
+    sum(songs_df$phrase_repetition == 0 & !is.na(songs_df$lyrics), na.rm = TRUE), "\n")
+cat("Songs with zero title_repetition (but valid lyrics):",
+    sum(songs_df$title_repetition == 0 & !is.na(songs_df$lyrics), na.rm = TRUE), "\n")
+
+# View results
+results <- songs_df %>%
+  select(chart_year, artist, title, phrase_repetition, title_repetition)
+print.data.frame(results, max = 1000)
 ```
 
 ## Section Three
