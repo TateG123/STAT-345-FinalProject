@@ -156,6 +156,62 @@ songs_df <- songs_info %>%
 
 songs_df %>% select(artist, title, lyrics)
 
+library(rvest)
+library(dplyr)
+library(stringr)
+library(purrr)
+
+# List of genre URLs and corresponding genre labels
+genre_urls <- tibble(
+  genre = c("pop", "rock", "hip-hop", "rnb", "blues"),
+  url = c(
+    "https://www.last.fm/tag/pop/tracks",
+    "https://www.last.fm/tag/rock/tracks",
+    "https://www.last.fm/tag/hip-hop/tracks",
+    "https://www.last.fm/tag/rnb/tracks",
+    "https://www.last.fm/tag/blues/tracks"
+  )
+)
+
+# Function to scrape title and artist from a single URL
+scrape_genre_tracks <- function(url, genre) {
+  tryCatch({
+    page <- read_html(url)
+    
+    titles <- page %>%
+      html_elements(".chartlist-name a") %>%
+      html_text(trim = TRUE)
+    
+    artists <- page %>%
+      html_elements(".chartlist-artist a") %>%
+      html_text(trim = TRUE)
+    
+    tibble(title = titles, artist = artists, genre = genre)
+  }, error = function(e) {
+    message(paste("Error scraping", genre, ":", e$message))
+    return(tibble(title = character(), artist = character(), genre = character()))
+  })
+}
+
+# Scrape all genre pages
+all_tracks <- pmap_dfr(genre_urls, ~ scrape_genre_tracks(..2, ..1))
+
+# Remove duplicates, keeping the first genre each song appears under
+unique_tracks <- all_tracks %>%
+  distinct(title, artist, .keep_all = TRUE)
+
+# View the resulting combined table
+print(unique_tracks)
+
+unique_tracks <- unique_tracks %>%
+  mutate(lyrics = map2_chr(artist, title, get_lyrics_from_genius_direct))
+
+genre_songs <- unique_tracks %>%
+  filter(!is.na(lyrics))
+
+print(unique_tracks)
+print(genre_songs)
+
 ```
 
 
