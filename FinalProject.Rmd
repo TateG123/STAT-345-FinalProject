@@ -212,6 +212,96 @@ genre_songs <- unique_tracks %>%
 print(unique_tracks)
 print(genre_songs)
 
+get_repeated_phrase_count <- function(lyrics, n = 3) {
+  words <- unlist(str_split(lyrics, "\\s+"))
+  phrases <- slide_chr(words, ~ str_c(.x, collapse = " "), .before = 0, .after = n - 1, .step = 1)
+  phrases <- phrases[!is.na(phrases) & str_count(phrases, "\\S+") == n]
+  
+  repeated <- tibble(phrase = phrases) %>%
+    count(phrase, sort = TRUE) %>%
+    filter(n > 1)
+
+  nrow(repeated)  # Just the count
+}
+
+
+count_title_repetition <- function(lyrics, title) {
+  title_clean <- str_to_lower(title) %>% str_replace_all("[^a-z0-9 ]", "")
+  lyrics_clean <- str_to_lower(lyrics) %>% str_replace_all("[^a-z0-9 ]", " ")
+  title_words <- unlist(str_split(title_clean, "\\s+"))
+  
+  full_count <- str_count(lyrics_clean, fixed(title_clean))
+  word_counts <- sapply(title_words, function(w) str_count(lyrics_clean, fixed(w)))
+  
+  list(full_title_repeats = full_count, title_word_repeats = sum(word_counts))
+}
+
+
+
+songs_rep <- songs_df %>%
+  rowwise() %>%
+  mutate(
+    title_repeats = list(count_title_repetition(lyrics, title)),
+    phrase_repeat_count = get_repeated_phrase_count(lyrics, n = 3)
+  ) %>%
+  mutate(
+    full_title_repeats = title_repeats$full_title_repeats,
+  ) %>%
+  select(-title_repeats) %>%
+  ungroup()
+print(songs_rep)
+
+songs_repgen <- genre_songs %>%
+  rowwise() %>%
+  mutate(
+    title_repeats = list(count_title_repetition(lyrics, title)),
+    phrase_repeat_count = get_repeated_phrase_count(lyrics, n = 3)
+  ) %>%
+  mutate(
+    full_title_repeats = title_repeats$full_title_repeats,
+  ) %>%
+  select(-title_repeats) %>%
+  ungroup()
+print(songs_repgen)
+
+
+songs_rep <- songs_rep %>%
+  mutate(
+    phrase_repeats = map_dbl(phrase_repeat_count, ~ ifelse(length(.x) == 0, NA, .x)),
+    full_title_repeats = map_dbl(full_title_repeats, ~ ifelse(length(.x) == 0, NA, .x)),
+    chart_year = as.integer(chart_year)
+  ) %>%
+  filter(!is.na(phrase_repeats) & !is.na(full_title_repeats))
+
+library(ggplot2)
+
+ggplot(songs_rep, aes(x = chart_year, y = phrase_repeats)) +
+  geom_point(alpha = 0.6, color = "steelblue") +
+  geom_smooth(method = "loess", se = FALSE, color = "darkblue") +
+  labs(title = "Phrase Repeats by Chart Year",
+       x = "Chart Year", y = "Phrase Repeats")
+
+# Plot full title repeats over time
+ggplot(songs_rep, aes(x = chart_year, y = full_title_repeats)) +
+  geom_point(alpha = 0.6, color = "tomato") +
+  geom_smooth(method = "loess", se = FALSE, color = "darkred") +
+  labs(title = "Full Title Repeats by Chart Year",
+       x = "Chart Year", y = "Full Title Repeats")
+
+ggplot(songs_repgen, aes(x = genre, y = phrase_repeat_count)) +
+  geom_boxplot(fill = "skyblue")  +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12),  # Increase size
+        axis.title = element_text(size = 14)) +
+  scale_x_discrete(labels = function(x) gsub("&", "and", x)) +  # Optional: fix label rendering
+  labs(title = "Phrase Repeats by Genre", x = "Genre", y = "Phrase Repeats")
+
+ggplot(songs_repgen, aes(x = genre, y = full_title_repeats)) +
+  geom_boxplot(fill = "lightgreen")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12),  # Increase size
+        axis.title = element_text(size = 14)) +
+  scale_x_discrete(labels = function(x) gsub("&", "and", x)) +  # Optional: fix label rendering
+  labs(title = "Phrase Repeats by Genre", x = "Genre", y = "Phrase Repeats")
+
 ```
 
 
