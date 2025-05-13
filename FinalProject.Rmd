@@ -414,6 +414,29 @@ print.data.frame(results, max = 1000)
 ## Section Three
 
 ```{r student3 - Tate}
+library(dplyr)
+library(ggplot2)
+
+# Average repetition by year
+yearly_repetition <- songs_df %>%
+  group_by(chart_year) %>%
+  summarise(
+    avg_phrase_repetition = mean(phrase_repetition, na.rm = TRUE),
+    avg_title_repetition = mean(title_repetition, na.rm = TRUE),
+    song_count = n()
+  )
+
+# Plot repetition over time
+ggplot(yearly_repetition, aes(x = chart_year)) +
+  geom_line(aes(y = avg_phrase_repetition, color = "Phrase Repetition"), size = 1.2) +
+  geom_line(aes(y = avg_title_repetition, color = "Title Repetition"), size = 1.2) +
+  labs(
+    title = "Song Repetition by Charting Year",
+    x = "Chart Year",
+    y = "Repetition Score",
+    color = "Repetition Type"
+  ) +
+  theme_minimal()
 
 ```
 
